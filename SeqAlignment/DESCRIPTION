@@ -1,0 +1,24 @@
+Package: SeqAlignment
+Title: Global sequence alignment for nucleotide sequeces
+Version: 0.0.99
+Authors@R: 
+    person(given = "Francesco",
+           family = "Morettini",
+           role = c("aut", "cre"),
+           email = "francesco.morettini@mail.polimi.it")
+Description: This R package has been developed in order to find the optimal
+    global alignment between two nucleotide sequences, using both the
+    Needleman-Wunsch (NW) and the FOGSAA algorithms.
+Depends: R (>= 3.6)
+Imports: stringi,
+         methods
+Suggests: BiocStyle,
+          knitr,
+          rmarkdown,
+          testthat
+License: GPL-2
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+VignetteBuilder: knitr

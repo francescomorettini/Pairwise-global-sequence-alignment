@@ -1,0 +1,235 @@
+---
+title: "SeqAlignment"
+author: "Morettini Francesco"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SeqAlignment}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(SeqAlignment)
+```
+
+# Global Sequence Alignment
+This R package wants to provide a tool to perform a global alignment
+between two sequences of nucleotides. Two different algorithms are present in 
+the package, the first one is the Needleman-Wunsh algorithm which is the most 
+famous algorithm for global sequence alignment. The second is the Fast Optimal 
+Global Sequence Alignment Algorithm (FOGSAA) which is a new algorithm well 
+described here <https://pubmed.ncbi.nlm.nih.gov/23624407/>.
+The NW algorithm works well even for long sequences, it is fast for sequence
+which are more than hundreds base long. The FOGSAA algorithm, unfortunately,
+is not that efficient. In fact even though works properly, giving a good 
+alignment, it is slow. Generally I would suggest to use it with sequences
+shorter than 50 nucleotides.
+
+## Needleman-Wunsh
+The Needleman-Wunsh algorithm is used in bioinformatics to align both protein 
+and DNA sequences. To compute the optimal matching it makes use of a matrix 
+system. The algorithm is based on 4 steps:
+
+* Choice of a scoring system
+* Matrix initialisation
+* Filling the matrix
+* Traceback to the origin
+
+### Choice of a scoring system
+When we select the scoring system there are three parameters that should be 
+conisdered:
+
+* Match score: when two characters at the current index are the same
+* Mismatch score: when the two characters at the current index are different
+* Gap score: when one character is aligned with a gap (-) in the other string
+
+### Matrix initialisation
+A matrix of dimension n+1, m+1 is created where n and m are respectively the 
+length of sequence 1 and sequence 2. Then the upper-left cell is filled with 0. 
+For all the other cells the score is computed by comparing the score obtained 
+from the neighboring cells. 
+
+### Filling the matrix
+The scores are computed considering all the neighboring cells, which are the one
+to the left, the upper one and the one on the diagonal.
+
+* The path from the top or left cell represents an indel pairing, so take the 
+scores of the left and the top cell, and add the score for a gap to each 
+of them.
+
+* The diagonal path represents a match/mismatch, so take the score of the 
+top-left diagonal cell and add the score for match if the corresponding bases 
+(amino acids) in the row and column are matching or the score for mismatch if 
+they do not.
+
+Among the three scores we have computed, we select the highest one. Note that
+in case of any draw we chose for the diagonal direction since it won't give us
+an indel in the final sequence. We also need to save the cell from which we 
+arrived in the trace back matrix. This is done for every cell of the matrix.
+In the end we will have a matrix full of numbers which give us the scores and
+the trace back matrix full of "left", "top" and "diagonal" which give us the
+possibility to do the trace back.
+
+### Traceback to the origin
+Starting from the bottom right cell we move towards the origin. To do the 
+traceback we follow the direction which we have saved in the previous step.
+For every cell in which we end up, if it is a "diagonal" cell we add the 
+corresponding character of that row and column to our aligned strings. 
+In case we are in a "top" cell or in a "left" cell a gap will be inserted in 
+one of the aligned strings and the right character in the other string.
+
+```{r}
+sequence1 <- 'ATGAGTCTCTCTGATAAGGACAAGGCTGCTGTGAAAGCCCTATGG'
+sequence2 <- 'CTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAG'
+match <- 1
+mismatch <- -1
+gap <- -2
+aligned <- nw_alignment(sequence1, sequence2, match, mismatch, gap)
+aligned
+```
+
+## FOGSAA Introduction
+The FOGSAA algorithm is basically a branch and bound approach of global 
+pairwise sequence alignment. It works by building a tree where each branch 
+represents a possible way to align the two sequences. The branches are composed
+of nodes which stores different information that are used to find the optimal
+alignment. The algorithm starts by computing a first complete branch, after that 
+it searches for more promising branches. In order to evaluate the goodness of a 
+branch we consider the Fitness score of the nodes that we are expanding. This 
+scoring system and the class node are define in the following section.
+For a good example of the algorithm I would suggest to take a look at the 
+supplementary material of the aforementioned paper.
+
+
+## Class node
+This is a Reference class which has been used to implement the FOGSAA algorithm.
+An object node has several attributes which are the following:
+
+* P1 It is the pointer to the characters in sequence 1.
+* P2 It is the pointer to the characters in sequence 2.
+* PrS Present score of the node.
+* Fmin Minimum of the future score.
+* Fmax Maximum of the future score.
+* Tmin Minimum of the Fitted score computed as the sum of PrS and Fmin.
+* Tmax Maximum of the Fitted score computed as the sum of PrS and Fmax.
+* v1 Value of sequence 1 at which P1 is pointing.
+* v2 Value of sequence 2 at which P2 is pointing.
+* x1 Defined as n - P2 where n is the length of sequence 2.
+* x2 Defined as m - P1 where m is the length of sequence 1.
+* code Indicates how the instance was originated, 11 if incrementing both P1 and 
+P2 from the previous node, 01 if only P2 is incremented and 10 if only P1 is 
+incremented.
+
+As a first thing, we want to describe two sequences which are S1 and S2, 
+respectively of length m and n.
+
+$$S1 : (a_{1}a_{2} \dots a_{m})$$ 
+$$S2 : (b_{1}b_{2} \dots b_{n})$$
+
+P1 and P2 are the pointers to the symbols of S1 and S2 which we have denoted 
+with $v1$ and $v2$. The root node has P1 = 0 and P2 = 0.
+Now imagine to have a node at position (P1,P2). It means that we have already
+checked P1 symbols from S1 and P2 symbols from S2 and the $k$ nodes checked are:
+$(i_{1},j_{1}), (i_{2},j_{2}), \dots, (i_{k},j_{k})$ where $i_{k}$= P1 and 
+$j_{k}$= P2. 
+Then the present score of a node is:
+
+$$PrS = \sum_{\forall i_{p}j_{p},1 \le p \le k} SC_{i_{p}j_{p}}$$
+where: <br/>
+$SC_{i_{p}j_{p}} = M$ if $a_{i} = b_{i}$ <br/>
+$SC_{i_{p}j_{p}} = Ms$ if $a_{i} \neq b_{i}$ <br/>
+$SC_{i_{p}j_{p}} = G$ if $a_{i} = gap \lor b_{i} = gap$ <br/>
+
+M indicates the match score, Ms the mismatch score and G the gap score.
+
+
+Fmin and Fmax are the intervals for the future score of a node. The future score
+is computed considering the best possible and the worst possible scenario.
+At least if the pointers are at (P1,P2) we will have $|(m-P1) - (n-P2)|$ gaps.
+Then in the best case we will have all matches and in the worst all mismatches.
+
+$Fmin = x2 * Ms + G * (x1 - x2)$ if $x2 < x1$ <br/>
+$Fmin = x1 * Ms + G * (x2 - x1)$ otherwise <br/>
+
+
+$Fmax = x2 * M + G * (x1 - x2)$ if $x2 < x1$ <br/>
+$Fmax = x1 * M + G * (x2 - x1)$ otherwise <br/>
+
+
+where <br/>
+$x1 = (n - P2)$ and $x2 = (m - P1)$ <br/>
+
+Finally we can compute the Fitness score which is the sum of the present score
+and the future score. So we have:
+
+$Tmin = PrS + Fmin$<br/>
+$Tmax = PrS + Fmax$<br/>
+
+## FOGSAA algorithm
+The path starts from root where P1 and P2 are equal to 0. P1 and P2 are the 
+pointers to sequence 1 and sequence 2 respectively. From there the best node,
+according to the fitness score, is chosen and attached to the branch.
+The node is chosen between three nodes: 11 in which both P1 and P2 are incremented, 
+node 10 and node 01. The two nodes which are not chosen are inserted in a queue.
+Once the first branch is completed, the score of this is saved into the variable
+lower bound. Then we start to search for a better branch, to do that we check 
+the most promising node of the queue according to its fitness score. 
+We start expanding a new branch from the best node of the queue. If at any point
+the Fitness score of a node is lower than an already expanded node, with the 
+same values of P1 and P2, we prune the branch. 
+Than we continue to take the best node of the queue and expand it until the 
+queue is empty. Once the queue is empty we start with the trace back phase.
+
+In the trace back phase we start from the last node of the better branch from
+which we extract the values to which the pointers P1 and P2 are pointing.
+Then we go back to root one node at the time by looking at the node from which 
+they originated. This is possible by selecting the best node between the
+expanded ones that has the right values of P1 and P2, these two values can be
+computed considering the node we are at and its attribute code which define
+how it was originated.
+
+```{r}
+sequence1 <- 'ATGAGTCTCTCTGATAAGGACAAGGCTGCTGTGAAAGCCCTATGG'
+sequence2 <- 'CTGTCTCCTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTAAG'
+match <- 1
+mismatch <- -1
+gap <- -2
+aligned <- fogsaa_alignment(sequence1, sequence2, match, mismatch, gap)
+aligned
+```
+
+## Score computation
+A final score for the alignment is computed considering the two aligned 
+sequences. For the score the values of match, mismatch and gap should be the 
+same used in the alignment function. The final score is the sum of the number of
+matches multiply by their match score minus the number of mismatches multiply 
+for the mismatch score and the number of gap multiply by their score.
+
+```{r}
+sequence1 <- 'ATGAGTCTCT-CTGATAAGGACAA-GGCTGCTGTGAAAGCCCTATGG'
+sequence2 <- 'CTGTCTC-CTGCCGACAAGACCAACGTCAAGGCCGCCTGGGGTA-AG'
+match <- 1
+mismatch <- -1
+gap <- -2
+score <- alignment_score(sequence1, sequence2, match, mismatch, gap)
+score
+```
+
+
+
+
+
+
+
+
+
+
+
